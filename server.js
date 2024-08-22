@@ -19,9 +19,9 @@ mongoose.connect(process.env.MONGO_URI, {
 .then(() => console.log('MongoDB connecté'))
 .catch((err) => console.error('Erreur de connexion à MongoDB:', err));
 
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/projects', projectRoutes); // Assurez-vous que le nom de la route est correct
+// // Routes
+// app.use('/api/auth', authRoutes);
+// app.use('/api/projects', projectRoutes); // Assurez-vous que le nom de la route est correct
 
 
 // Erreur 404
