@@ -26,7 +26,7 @@ app.use(express.json());
 
 // Routes
 // app.use('/api/auth', require('./routes/authRoutes'));
-// app.use('/api/auth', require('./routes/auth'));
+app.use('/api/', require('./routes/auth'));
 app.use('/api/projects', require('./routes/projet')); // Assurez-vous que le nom de la route est correct
 
 
