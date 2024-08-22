@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projet'); // Assurez-vous que le nom du fichier est correct
 const app = express();
+const path = require('path');
 
 // Autoriser toutes les origines
 app.use(cors());
@@ -22,5 +23,16 @@ mongoose.connect(process.env.MONGO_URI, {
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes); // Assurez-vous que le nom de la route est correct
 
+
+// Servir les fichiers statiques depuis le dossier 'public'
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Route pour toutes les autres requêtes GET, renvoyant index.html
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Serveur démarré sur le port ${PORT}`));
+
