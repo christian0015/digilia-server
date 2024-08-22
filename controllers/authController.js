@@ -2,61 +2,85 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const config = require('../config/config');
+// controllers/authController.js
+const generateToken = require('../utils/generateToken');
 
 exports.login = async (req, res) => {
+  const { email, password } = req.body;
   try {
-    const { username, password } = req.body;
-
-    const user = await User.findOne({ username });
+    const user = await User.findOne({ email });
     if (!user) {
-      return res.status(400).send({ error: 'Invalid login credentials' });
+      return res.status(400).json({ message: 'Utilisateur introuvable' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(400).send({ error: 'Invalid login credentials' });
+      return res.status(400).json({ message: 'Mot de passe incorrect' });
     }
-    
-    const token = jwt.sign({ _id: user._id }, config.jwtSecret);
-    // Supprime le mot de passe de l'objet utilisateur avant de l'envoyer dans la réponse
+
+    const token = generateToken(user._id);
     const { password: _, ...userWithoutPassword } = user.toObject();
-    res.send({ user:userWithoutPassword, token });
+    res.json({ token, user: userWithoutPassword });
   } catch (error) {
-    res.status(500).send({ error: 'Server Error' });
+    res.status(500).json({ message: 'Erreur serveur' });
   }
 };
 
 exports.register = async (req, res) => {
+  const { username, email, password } = req.body;
   try {
-    const { username, email, password, role } = req.body;
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: 'Cet email est déjà utilisé.' });
+    }
 
-    const user = new User({ username, email, password, role });
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = new User({ username, email, password: hashedPassword });
     await user.save();
 
-    const token = jwt.sign({ _id: user._id }, config.jwtSecret);
-    res.status(201).send({ user, token });
+    const token = generateToken(user._id);
+    res.status(201).json({
+      message: 'Inscription réussie.',
+      user: { id: user._id, username: user.username, email: user.email, role: user.role },
+      token,
+    });
   } catch (error) {
-    res.status(400).send({ error: 'Error during registration' });
+    res.status(500).json({ message: 'Erreur lors de l’inscription.', error });
   }
 };
 
-exports.getAllUserProfile = async (req, res) => {
+exports.update = async (req, res) => {
+  const { username, email, password } = req.body;
+  const userId = req.user.id;
   try {
-    const users = await User.find().select('-password'); // Utilisez find() pour Mongoose
-    res.json(users);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server Error');
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+
+    if (username) user.username = username;
+    if (email) user.email = email;
+    if (password) user.password = await bcrypt.hash(password, 10);
+
+    await user.save();
+    const token = generateToken(user._id);
+
+    res.status(200).json({
+      message: 'Profil mis à jour avec succès',
+      user: { id: user._id, username: user.username, email: user.email, role: user.role },
+      token,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur lors de la mise à jour du profil', error });
   }
 };
 
-exports.getUserProfile = async (req, res) => {
+exports.delete = async (req, res) => {
+  const userId = req.user.id;
   try {
-    const user = await User.findById(req.user.id).select('-password');
-    res.json(user);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server Error');
+    await User.findByIdAndDelete(userId);
+    res.status(200).json({ message: 'Compte supprimé avec succès' });
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur lors de la suppression du compte', error });
   }
 };
