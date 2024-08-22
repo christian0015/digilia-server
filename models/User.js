@@ -8,13 +8,13 @@ const userSchema = new mongoose.Schema({
   subscription: {type: {  type: String,  enum: ['free', 'basic', 'premium'],default: 'free',},startDate: {  type: Date,  default: Date.now,},endDate: {  type: Date,},status: {  type: String,  enum: ['active', 'inactive'],  default: 'inactive',},},
   createdAt: {type: Date,default: Date.now,},
   updatedAt: {type: Date,default: Date.now,},
-}, { collection: 'digiliaUsers' }); // Nom de collection avec préfixe
+}); // Nom de collection avec préfixe
 
 userSchema.pre('save', function (next) {
   this.updatedAt = Date.now();
   next();
 });
 
-const User = mongoose.model('User', userSchema);
+const User = mongoose.model('UserD', userSchema);
 
 module.exports = User;
