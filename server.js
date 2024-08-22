@@ -34,7 +34,7 @@ app.use(express.json());
 app.use('/api/products', require('./routes/productRoutes'));
 app.use('/api/ventes', require('./routes/venteRoutes'));
 // Routes
-// app.use('/api/auth', require('./routes/auth'));
+app.use('/api/auth', require('./routes/auth'));
 app.use('/api/projects', require('./routes/projet')); // Assurez-vous que le nom de la route est correct
 
 
