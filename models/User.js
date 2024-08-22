@@ -1,4 +1,3 @@
-// models/User.js
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
@@ -25,7 +24,7 @@ const userSchema = new mongoose.Schema({
   subscription: {
     type: {
       type: String,
-      enum: ['free', 'basic', 'premium'],
+      enum: ['free', 'basic', 'premium'], // Types d'abonnement disponibles
       default: 'free',
     },
     startDate: {
@@ -49,7 +48,7 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
-}, { collection: 'digiliaUsers' });
+}, { collection: 'digiliaUsers' }); // Nom de collection avec préfixe
 
 userSchema.pre('save', function (next) {
   this.updatedAt = Date.now();
