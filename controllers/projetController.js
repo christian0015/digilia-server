@@ -1,10 +1,10 @@
 const Projet = require('../models/Projet');
 const User = require('../models/User'); // Assurez-vous d'importer le modèle User
 
-// Créer un projet
+  // Créer un projet
 exports.createProjet = async (req, res) => {
-  const { name, description, code } = req.body;
-  const userId = req.user.id;
+  const { name, description, code } = req.body.newProjet;
+  const userId = req.body.userId;
 
   try {
     const projet = new Projet({
@@ -41,16 +41,17 @@ const updateSubscriptionStatus = async (userId) => {
     }
   };
   
-
 // Obtenir les projets d'un utilisateur
 exports.getUserProjets = async (req, res) => {
   try {
-    const projets = await Projet.find({ user: req.user.id });
+    const userId = req.query.userId; // Utilisation de req.query pour extraire userId
+    const projets = await Projet.find({ user: userId });
     res.status(200).json(projets);
   } catch (error) {
     res.status(500).json({ message: 'Erreur lors de la récupération des projets', error });
   }
 };
+
 
 // Mettre à jour le nom du projet
 exports.updateProjetName = async (req, res) => {
