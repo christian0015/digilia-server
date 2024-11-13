@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const Projet = require('../models/Projet');
 const bcrypt = require('bcryptjs');
 const generateToken = require('../utils/generateToken');
 
@@ -54,9 +55,13 @@ exports.register = async (req, res) => {
 
 // Mise à jour du profil
 exports.update = async (req, res) => {
-  const { username, email, password } = req.body;
-  const userId = req.user.id;
+  // const userId = req.body._id;
+  // const username = req.body.username;
+  // const email = req.body.email;
+  // const password = req.body.password;
+  const { _id: userId, username, email, password } = req.body; // Ajoutez password ici
 
+  
   try {
     const user = await User.findById(userId);
     if (!user) {
@@ -71,7 +76,7 @@ exports.update = async (req, res) => {
     const token = generateToken(user._id);
 
     res.status(200).json({
-      message: 'Profil mis à jour avec succès',
+      message: 'Profille mis à jour avec succès',
       user: { id: user._id, username: user.username, email: user.email, role: user.role },
       token,
     });
@@ -82,10 +87,10 @@ exports.update = async (req, res) => {
 
 // Suppression du compte
 exports.delete = async (req, res) => {
-  const userId = req.user.id;
+  const userId = req.params.userId;
 
   try {
-    await Project.deleteMany({ user: userId });
+    await Projet.deleteMany({ user: userId });
     await User.findByIdAndDelete(userId);
     res.status(200).json({ message: 'Compte supprimé avec succès' });
   } catch (error) {

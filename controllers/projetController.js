@@ -52,6 +52,36 @@ exports.getUserProjets = async (req, res) => {
   }
 };
 
+// Update le code d'un projet
+exports.updateProjetCode = async (req, res) => {
+  const { projetId } = req.params;
+  const userId = req.body.userId;
+  const newCode = req.body.newCode;
+
+  try {
+    // Update le code d'un projet
+    
+    // Trouver et mettre à jour le projet
+    const projet = await Projet.findById(projetId);
+    
+    if (!projet) {
+      return res.status(404).json({ message: 'Projet non trouvé.' });
+    }
+
+    // Vérifier que l'utilisateur est le propriétaire du projet (optionnel, si nécessaire)
+    if (projet.user.toString() !== userId) {
+      return res.status(403).json({ message: 'Accès interdit.' });
+    }
+
+    projet.code = newCode;
+    await projet.save();
+
+    res.status(200).json({ message: 'Nom du projet mis à jour avec succès.', projet });
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur lors de la mise à jour du nom du projet.', error });
+  }
+};
+
 
 // Mettre à jour le nom du projet
 exports.updateProjetName = async (req, res) => {
@@ -83,7 +113,7 @@ exports.updateProjetName = async (req, res) => {
 // Supprimer un projet
 exports.deleteProjet = async (req, res) => {
     const { projetId } = req.params;
-    const userId = req.user.id;
+    const userId = req.body.userId;
   
     try {
       // Supprimer le projet

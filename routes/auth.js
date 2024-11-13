@@ -4,7 +4,7 @@ const router = express.Router();
 
 router.post('/login', login);
 router.post('/register', register);
-router.post('/update', update);
-router.post('/delete', deleteUser);
+router.put('/update', update);
+router.delete('/delete/:userId', deleteUser);
 
 module.exports = router;
