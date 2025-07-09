@@ -28,6 +28,8 @@ app.use(express.json());
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/projets', require('./routes/projet')); // Assurez-vous que le nom de la route est correct
 
+app.use('/api/export', require('./routes/export'));
+
 
 // Erreur 404
 app.use((req, res, next) => {

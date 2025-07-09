@@ -52,6 +52,30 @@ exports.getUserProjets = async (req, res) => {
   }
 };
 
+// Récupérer un seul projet par ID
+exports.getOneProjet = async (req, res) => {
+  const { projetId } = req.params;
+  const userId = req.query.userId; // ou depuis le token si tu protèges via auth
+
+  try {
+    const projet = await Projet.findById(projetId);
+
+    if (!projet) {
+      return res.status(404).json({ message: 'Projet non trouvé.' });
+    }
+
+    if (projet.user.toString() !== userId) {
+      return res.status(403).json({ message: 'Accès interdit.' });
+    }
+
+    res.status(200).json(projet);
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur lors de la récupération du projet.', error });
+  }
+};
+
+
+
 // Update le code d'un projet
 exports.updateProjetCode = async (req, res) => {
   const { projetId } = req.params;
