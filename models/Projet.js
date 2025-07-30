@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const projectSchema = new mongoose.Schema({
+const projetSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -31,10 +31,10 @@ const projectSchema = new mongoose.Schema({
   },
 }, { collection: 'digiliaProjets' }); // Nom de collection avec préfixe
 
-projectSchema.pre('save', function (next) {
+projetSchema.pre('save', function (next) {
   this.updatedAt = Date.now();
   next();
 });
 
-const Project = mongoose.model('Project', projectSchema);
-module.exports = Project;
+const Projet = mongoose.model('Projet', projetSchema);
+module.exports = Projet;

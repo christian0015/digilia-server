@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Projet = require('../models/Projet');
+const Export = require('../models/Export');
 const bcrypt = require('bcryptjs');
 const generateToken = require('../utils/generateToken');
 
@@ -90,9 +91,22 @@ exports.delete = async (req, res) => {
   const userId = req.params.userId;
 
   try {
+    // 1. Récupérer tous les projets de l'utilisateur
+    const projets = await Projet.find({ user: userId });
+
+    // 2. Extraire les IDs des projets
+    const projetIds = projets.map(p => p._id);
+
+    // 3. Supprimer tous les exports liés aux projets de l'utilisateur
+    await Export.deleteMany({ projet: { $in: projetIds } });
+
+    // 4. Supprimer les projets
     await Projet.deleteMany({ user: userId });
+
+    // 5. Supprimer l'utilisateur
     await User.findByIdAndDelete(userId);
-    res.status(200).json({ message: 'Compte supprimé avec succès' });
+
+    res.status(200).json({ message: 'Compte et toutes les données associées supprimés avec succès.' });
   } catch (error) {
     res.status(500).json({ message: 'Erreur lors de la suppression du compte', error });
   }

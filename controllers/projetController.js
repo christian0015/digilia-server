@@ -1,5 +1,6 @@
 const Projet = require('../models/Projet');
 const User = require('../models/User'); // Assurez-vous d'importer le modèle User
+const Export = require('../models/Export');
 
   // Créer un projet
 exports.createProjet = async (req, res) => {
@@ -140,13 +141,16 @@ exports.deleteProjet = async (req, res) => {
     const userId = req.body.userId;
   
     try {
-      // Supprimer le projet
+      // 1. Supprimer l'export lié à ce projet
+      await Export.findOneAndDelete({ projet: projetId });
+
+      // 2. Supprimer le projet
       await Projet.findByIdAndDelete(projetId);
-  
-      // Mettre à jour le statut d'abonnement
+
+      // 3. Mettre à jour le statut d'abonnement
       await updateSubscriptionStatus(userId);
-  
-      res.status(200).json({ message: 'Projet supprimé avec succès.' });
+
+      res.status(200).json({ message: 'Projet et export associés supprimés avec succès.' });
     } catch (error) {
       res.status(500).json({ message: 'Erreur lors de la suppression du projet.', error });
     }
