@@ -31,6 +31,9 @@ app.use('/api/projets', require('./routes/projet')); // Assurez-vous que le nom 
 app.use('/api/export', require('./routes/export'));
 
 
+app.use('/api/digilia-info', require('./routes/digiliaInfo'));
+
+
 // Erreur 404
 app.use((req, res, next) => {
   res.status(404).json({ message: 'Resource not found' });
