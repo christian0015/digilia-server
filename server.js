@@ -32,7 +32,7 @@ app.use('/api/export', require('./routes/export'));
 
 
 app.use('/api/digilia-info', require('./routes/digiliaInfo'));
-
+app.use('/api/ai', require('./routes/aiRoutes'));
 
 // Erreur 404
 app.use((req, res, next) => {
