@@ -241,7 +241,7 @@ async function handleAICreation(req, res) {
 async function queryAI(promptData, model) {
     const apiUrl = 'https://api.groq.com/openai/v1/chat/completions'; // Exemple Groq
     const apiKey = process.env.GROQ_API_KEY;
-    // console.log("*****PromptData*****:" ,promptData);
+    console.log("*****PromptData*****:" ,promptData);
     
     const body = {
         model: model,
@@ -261,7 +261,7 @@ async function queryAI(promptData, model) {
     });
 
 
-    // console.log(response);
+    console.log(response);
         
     const rawContent = response.data?.choices?.[0]?.message?.content;
 
@@ -281,7 +281,7 @@ async function queryAI(promptData, model) {
       jsonData = JSON.parse(cleanedContent);
     }
       // jsonData = JSON.parse(cleanedContent);
-      // console.log(`Reponse API: ********************* ${JSON.stringify(jsonData, null, 2)} *******************`);
+      console.log(`Reponse API: ********************* ${JSON.stringify(jsonData, null, 2)} *******************`);
       
     } catch (e) {
       return { error: "Réponse IA invalide (non JSON)" };
