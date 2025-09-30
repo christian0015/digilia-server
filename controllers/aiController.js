@@ -1,6 +1,15 @@
 // controllers/aiController.js
 const axios = require('axios');
 
+// Importer User pour gérer quotas
+const User = require('../models/User'); // <- déjà existant si pas, à ajouter
+// Verifier l'existenceet la validite du token
+const decodeToken = require('../utils/verifyToken');
+
+// Librairie pour gérer les dates facilement
+const moment = require('moment'); // npm i moment
+
+
 // Liste des modèles disponibles et leur fallback si token insuffisant
 const MODEL_FALLBACKS = {
     'claude-sonnet-4': 'claude-opus-4',
@@ -161,6 +170,7 @@ async function handleAICreation(req, res) {
             colors = [],
             description,
             type = null,
+            typeSection = null,
             style = null,
             audience = null,
             fonts,
@@ -176,6 +186,64 @@ async function handleAICreation(req, res) {
         const styleRules = STYLE_RULES[style] || STYLE_RULES['ultra-professionnel'];
         const audienceHint = AUDIENCE_HINTS[audience] || '';
 
+        // *************************** Verification Droit de generation ***************************
+        // ****************************************************************************************
+        // ****************************************************************************************
+        // Récupérer l'utilisateur depuis le token (ex: Bearer token dans headers)
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ error: "Token manquant" });
+
+        let userId;
+        try {
+            userId = decodeToken(token); // <- ta fonction existante generateToken / verify
+        } catch {
+            return res.status(401).json({ error: "Token invalide" });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ error: "Utilisateur introuvable" });
+
+        // =================== RESET QUOTAS SI NOUVEAU JOUR ===================
+        // On reset les dailyGenerations si la date est passée
+        const today = moment().startOf('day');
+        if (!user.lastReset || moment(user.lastReset).isBefore(today)) {
+            user.dailyGenerations = 0;
+            // Reset les quotas payants si nécessaire selon abonnement
+            if (user.subscription.type === 'basic') user.paidGenerations = 20; // ex: 20/mois
+            else if (user.subscription.type === 'premium') user.paidGenerations = 50; // ex: 50/mois
+            user.lastReset = new Date();
+            await user.save();
+        }
+
+        // =================== VERIFIER QUOTAS AVANT GENERATION ===================
+        const isPaidRequest = req.body.usePaid || false; // ex: flag pour DeepSeek ou generation payante
+
+        if (isPaidRequest) {
+            if (user.paidGenerations <= 0) {
+                return res.status(403).json({ error: "Quota payant épuisé" });
+            }
+        } else {
+            if (user.dailyGenerations >= 15) { // ex: 5 sections/jour pour Free
+                return res.status(403).json({ error: "Quota journalier atteint" });
+            }
+        }
+
+        // =================== INCREMENTER LES QUOTAS ===================
+        user.dailyGenerations += 1;
+        if (isPaidRequest) user.paidGenerations -= 1;
+        await user.save();
+
+const prompt2 = {digiliaSchema,
+            userData: {
+                description,
+                type,
+                typeSection,
+                style,
+                fonts,
+                audience, 
+                colors,
+                language
+            }}
         const prompt = {
             instruction:  `
             Tu es un expert en développement front-end et en 3D, spécialisé sur le framework Digilia. 
@@ -197,16 +265,7 @@ async function handleAICreation(req, res) {
             - Reflechir avant utilisation : className, style, attributes, NB: Ne pas appliquer className sur grand element (ex: >500px) comme DIV ou texte.
             Toutes les valeurs doivent correspondre au type attendu. **Ne génère pas de texte explicatif**.
 
-            `,digiliaSchema,
-            userData: {
-                description,
-                type,
-                style,
-                fonts,
-                audience, 
-                colors,
-                language
-            },
+            `,
             instructionFinale:  `
             Génère la **structure JSON complète Digilia** correspondant aux informations ci-dessus. **Rien d’autre que le JSON: {id ...}**. Répond uniquement avec du JSON valide conforme au schéma Digilia. Ne mets aucun texte explicatif.
             `       
@@ -216,17 +275,23 @@ async function handleAICreation(req, res) {
 
         let response;
         try {
-            response = await queryAI(prompt, chosenModel);
+            response = await queryAI(prompt, chosenModel, prompt2);
         } catch (err) {
             // Si erreur (ex: modèle à court de tokens), on bascule sur le fallback
             const fallbackModel = MODEL_FALLBACKS[chosenModel] || 'llama-3.1-8b-instant';
-            response = await queryAI(prompt, fallbackModel);
+            response = await queryAI(prompt, fallbackModel, prompt2);
             chosenModel = fallbackModel;
         }
 
         res.json({
             modelUsed: chosenModel,
-            data: response
+            data: response,
+            quota: {
+            dailyUsed: user.dailyGenerations,
+            dailyRemaining: 5 - user.dailyGenerations, // ou ton quota Free
+            paidUsed: user.subscription.type !== 'free' ? (user.subscription.type === 'basic' ? 20 - user.paidGenerations : 50 - user.paidGenerations) : 0,
+            paidRemaining: user.paidGenerations
+          }
         });
 
     } catch (error) {
@@ -238,7 +303,7 @@ async function handleAICreation(req, res) {
 /**
  * Fonction pour interroger l'API IA
  */
-async function queryAI(promptData, model) {
+async function queryAI(promptData, model, prompt2) {
     const apiUrl = 'https://api.groq.com/openai/v1/chat/completions'; // Exemple Groq
     const apiKey = process.env.GROQ_API_KEY;
     console.log("*****PromptData*****:" ,promptData);
@@ -246,7 +311,8 @@ async function queryAI(promptData, model) {
     const body = {
         model: model,
         messages: [
-            { role: 'user', content: JSON.stringify(promptData) }
+            { role: 'system', content: JSON.stringify(promptData) },
+            { role: 'user', content: JSON.stringify(prompt2) }
             // { role: 'user', content: promptData.instruction + "\n" + JSON.stringify(promptData.userData) }
 
         ],

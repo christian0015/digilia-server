@@ -19,8 +19,10 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: 'Mot de passe incorrect' });
     }
 
-    const token = generateToken(user._id);
+    const token = generateToken(user._id, '2d'); // Expiration 2 jours);
     const { password: _, ...userWithoutPassword } = user.toObject();
+    // Ajouter le token dans l'objet user
+    userWithoutPassword.token = token;
     res.json({ token, user: userWithoutPassword });
   } catch (error) {
     res.status(500).json({ message: 'Erreur serveur' });
@@ -34,7 +36,17 @@ exports.register = async (req, res) => {
   try {
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ message: 'Cet email est déjà utilisé.' });
+
+      const isMatch = await bcrypt.compare(password, existingUser.password);
+        if (isMatch) {
+          const token = generateToken(existingUser._id, '2d'); // Expiration 2 jours);
+          const { password: _, ...userWithoutPassword } = existingUser.toObject();
+          // Ajouter le token dans l'objet existingUser
+          userWithoutPassword.token = token;
+          return res.json({ token, user: userWithoutPassword });
+        }
+
+      return res.status(400).json({ message: 'Cet email est déjà utilisé. Essayez de vous connecter.' });
     }
 
     // Hasher le mot de passe avant de créer l'utilisateur
@@ -43,10 +55,10 @@ exports.register = async (req, res) => {
     const user = new User({ username, email, password: hashedPassword });
     await user.save();
 
-    const token = generateToken(user._id);
+    const token = generateToken(user._id, '2d'); // Expiration 2 jours);
     res.status(201).json({
       message: 'Inscription réussie.',
-      user: { id: user._id, username: user.username, email: user.email, role: user.role },
+      user: { id: user._id, username: user.username, email: user.email, role: user.role, token: token },
       token,
     });
   } catch (error) {
@@ -74,7 +86,7 @@ exports.update = async (req, res) => {
     if (password) user.password = await bcrypt.hash(password, 10);
 
     await user.save();
-    const token = generateToken(user._id);
+    const token = generateToken(user._id, '2d'); // Expiration 2 jours);
 
     res.status(200).json({
       message: 'Profille mis à jour avec succès',
