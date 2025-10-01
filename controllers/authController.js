@@ -58,10 +58,17 @@ exports.register = async (req, res) => {
     const token = generateToken(user._id, '2d'); // Expiration 2 jours);
     res.status(201).json({
       message: 'Inscription réussie.',
-      user: { id: user._id, username: user.username, email: user.email, role: user.role, token: token },
+      user: { _id: user._id, username: user.username, email: user.email, role: user.role, token: token },
       token,
     });
   } catch (error) {
+    // 👇 Ici on gère le cas MongoDB duplicate key
+    if (error.code === 11000) {
+      return res.status(400).json({
+        message: 'Erreur lors de l’inscription.',
+        error: 'Cet email ou nom d’utilisateur est déjà utilisé.',
+      });
+    }
     res.status(500).json({ message: 'Erreur lors de l’inscription.', error });
   }
 };
