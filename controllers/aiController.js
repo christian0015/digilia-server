@@ -5,7 +5,7 @@ const decodeToken = require('../utils/verifyToken');
 const { checkQuota, applyQuota } = require('../utils/quotaManager');
 const moment = require('moment');
 // import fs from 'fs';
-const fs = require('fs');const util = require("util");
+// const fs = require('fs');const util = require("util");
 
 
 // Liste des modèles disponibles et leur fallback
@@ -454,7 +454,7 @@ async function queryAI(promptData, model) {
             
             // Convertir en JSON joli pour lire facilement
             const jsonString = JSON.stringify(body, null, 2);
-            fs.writeFileSync('requestBody.txt', jsonString);
+            // fs.writeFileSync('requestBody.txt', jsonString);
             console.log('Le corps de la requête a été enregistré dans requestBody.txt');
 
                 const response = await axios.post(service.url, body, {
@@ -463,7 +463,7 @@ async function queryAI(promptData, model) {
             // console.log(response);
             // util.inspect permet de sérialiser des objets complexes sans erreur
             const fullResponse = util.inspect(response, { depth: null, colors: false });
-            fs.writeFileSync("response.txt", fullResponse, "utf-8");
+            // fs.writeFileSync("response.txt", fullResponse, "utf-8");
             console.log("Réponse complète sauvegardée dans response.txt ✅");
 
             
