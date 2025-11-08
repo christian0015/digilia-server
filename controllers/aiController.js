@@ -14,7 +14,7 @@ const MODEL_FALLBACKS = {
     'claude-sonnet-4': 'claude-sonnet-4',
     'openai/gpt-oss-120B': 'openai/gpt-oss-20B',
     'openai/gpt-oss-20B': 'openai/gpt-oss-20B',
-    'llama-3.3-70B-versatile': 'llama-3.1-8b-instant'
+    'llama-3.3-70B-versatile': 'llama-3.1-8b-instant', 'qwen/qwen3-32b' : 'llama-3.1-8b-instant'
 };
 
 // Mapping du max tokens selon le modèle
@@ -370,7 +370,7 @@ Génère la **structure JSON complète Digilia** correspondant aux informations 
             // 🔹 3️⃣ Mise à jour du quota après succès
             updatedUser = await applyQuota(userId, isPaidRequest, chosenModel);
         } catch (err) {
-            console.log("*************************************************Erreur avec le modèle principal:", err.message);
+            console.log("*************************************************Erreur avec le modèle principal: " ,chosenModel, " ", err.message);
             
             // Tentative avec fallback model
             const fallbackModel = MODEL_FALLBACKS[chosenModel] || 'llama-3.1-8b-instant';
@@ -492,29 +492,207 @@ async function queryAI(promptData, model) {
             // ****************************************
 
 
-
+            
             // Nettoyer le contenu
-            const cleanedContent = rawContent.replace(/^```json\s*/, '').replace(/```$/, '');
+            // Améliorer le nettoyage du contenu
+            function cleanAIResponse(content) {
+                if (!content) return content;
+                
+                console.log("🧹 Nettoyage de la réponse IA...");
+                
+                // Supprimer les balises think et toute réflexion
+                let cleaned = content.replace(/<think>[\s\S]*?<\/think>\s*/gi, '');
+                
+                // Supprimer les code blocks JSON
+                cleaned = cleaned.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '');
+                
+                // Supprimer les code blocks sans spécificateur
+                cleaned = cleaned.replace(/^```\s*/gi, '').replace(/```\s*$/gi, '');
+                
+                // Nettoyer les espaces et nouvelles lignes
+                cleaned = cleaned.trim();
+                
+                // Extraire uniquement le JSON si entouré de texte
+                const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    cleaned = jsonMatch[0];
+                }
+                
+                console.log("✅ Contenu nettoyé");
+                return cleaned;
+            }
 
-            let jsonData;
+            // Nettoyer agressivement la réponse
+            const cleanedContent = cleanAIResponse(rawContent);
+            console.log("Cleaned content preview:", cleanedContent.substring(0, 200));
+
+            // Parsing du Contenu
+            let parsedArray;
             try {
-                if (cleanedContent.trim().startsWith("[")) {
-                    console.log("Avait un []");
-                    
-                    const parsedArray = JSON.parse(cleanedContent);
-                    // jsonData = Array.isArray(parsedArray) ? parsedArray[0] : parsedArray;
+                parsedArray = JSON.parse(cleanedContent);
+            } catch (e) {
+                throw new Error("Réponse IA invalide (non JSON)");
+            }
 
-                    // Transformer le tableau en objet avec les IDs comme clés
+            // Remplacer la fonction extractRoot existante par cette version améliorée
+            function extractRoot(obj, depth = 0) {
+                console.log(`=== EXTRACT_ROOT DEPTH ${depth} ===`);
+                console.log("Input keys:", Object.keys(obj || {}));
+                
+                if (!obj || typeof obj !== "object") {
+                    console.log("❌ Objet invalide");
+                    return obj;
+                }
+
+                // 🔥 CORRECTION 1: Vérifier SI L'OBJET ACTUEL est une structure Digilia valide
+                if (obj.id && obj.elementType && obj.type) {
+                    console.log("✅✅✅ STRUCTURE DIGILIA DIRECTE TROUVÉE!");
+                    return obj;
+                }
+
+                // 🔥 CORRECTION 2: Extraction ULTRA-AGGRESSIVE - chercher n'importe quel enfant avec la structure
+                console.log("🔍 Recherche AGGRESSIVE de structure Digilia...");
+                
+                // Liste des clés potentielles où pourrait se cacher la structure
+                const potentialKeys = ['digiliaSchema', 'schema', 'data', 'result', 'response', 'content', 'output'];
+                
+                for (const key of potentialKeys) {
+                    if (obj[key] && typeof obj[key] === "object") {
+                        console.log(`   📦 Clé potentielle trouvée: ${key}`);
+                        const found = extractRoot(obj[key], depth + 1);
+                        if (found && found.id && found.elementType && found.type) {
+                            console.log(`🎯 Structure valide extraite de: ${key}`);
+                            return found;
+                        }
+                    }
+                }
+
+                // 🔥 CORRECTION 3: Parcourir TOUTES les clés objet peu importe le nom
+                console.log("🔍 Parcours de TOUTES les clés objet...");
+                for (const key of Object.keys(obj)) {
+                    if (typeof obj[key] === "object" && obj[key] !== null) {
+                        console.log(`   🔎 Analyse clé: ${key}`);
+                        const found = extractRoot(obj[key], depth + 1);
+                        if (found && found.id && found.elementType && found.type) {
+                            console.log(`🎯 Structure valide trouvée dans: ${key}`);
+                            return found;
+                        }
+                    }
+                }
+
+                // 🔥 CORRECTION 4: Si c'est un tableau, chercher le PREMIER élément valide
+                if (Array.isArray(obj)) {
+                    console.log("📋 C'est un tableau, recherche du premier élément valide...");
+                    for (let i = 0; i < Math.min(obj.length, 5); i++) { // Limiter pour les logs
+                        console.log(`   Élément ${i} type:`, typeof obj[i]);
+                        const found = extractRoot(obj[i], depth + 1);
+                        if (found && found.id && found.elementType && found.type) {
+                            console.log(`✅ Élément ${i} du tableau est valide!`);
+                            return found;
+                        }
+                    }
+                }
+
+                console.log("❌ Aucune structure Digilia valide trouvée");
+                return obj;
+            }
+
+            function validateAndExtractFinalData(root, originalParsed) {
+                console.log("=== VALIDATION FINALE ===");
+                console.log("Root keys:", Object.keys(root || {}));
+                
+                // 🔥 CORRECTION 5: Si root a encore digiliaSchema, on l'extrait de force
+                if (root && root.digiliaSchema && root.digiliaSchema.id && root.digiliaSchema.elementType && root.digiliaSchema.type) {
+                    console.log("🔄 Extraction FORCÉE depuis digiliaSchema dans root");
+                    return root.digiliaSchema;
+                }
+                
+                // Vérification des champs requis
+                if (root && root.id && root.elementType && root.type) {
+                    console.log("✅✅✅ STRUCTURE DIGILIA VALIDE!");
+                    console.log("ID:", root.id);
+                    console.log("elementType:", root.elementType);
+                    console.log("type:", root.type);
+                    return root;
+                }
+                
+                // 🔥 CORRECTION 6: Dernière tentative - chercher n'importe où dans l'objet original
+                console.log("🔄 Dernière tentative de recherche...");
+                const deepSearch = (obj) => {
+                    if (!obj || typeof obj !== "object") return null;
+                    
+                    if (obj.id && obj.elementType && obj.type) return obj;
+                    
+                    for (const key in obj) {
+                        if (typeof obj[key] === "object") {
+                            const found = deepSearch(obj[key]);
+                            if (found) return found;
+                        }
+                    }
+                    return null;
+                };
+                
+                const finalAttempt = deepSearch(originalParsed);
+                if (finalAttempt) {
+                    console.log("🎯 Structure trouvée en recherche profonde!");
+                    return finalAttempt;
+                }
+                
+                throw new Error("Structure Digilia invalide - impossible d'extraire les champs requis");
+            }
+
+                        
+
+                        
+            // Extraire la racine utile
+            let root = extractRoot(parsedArray);
+
+            // 🔥 UTILISATION DE LA VALIDATION AMÉLIORÉE
+            let finalData = validateAndExtractFinalData(root, parsedArray);
+
+            console.log("🎯 Structure Digilia valide trouvée!");
+            console.log("Taille du JSON final:", JSON.stringify(finalData).length);
+            console.log("100 premiers caractères FINAL:", JSON.stringify(finalData).substring(0, 100));
+
+            root = finalData
+
+            // Validation finale
+            if (!root || !root.id || !root.elementType || !root.type) {
+                console.error("❌ Structure Digilia invalide après extraction:");
+                console.log("Root keys:", Object.keys(root || {}));
+                throw new Error("Structure Digilia invalide - champs requis manquants");
+            }
+
+            console.log("🎯 Structure Digilia valide trouvée!");
+            // return root;
+
+            // ✅ On a trouvé un objet valide
+            let jsonData = root;
+            // Convertir l'objet en texte JSON
+            const jsonStringTest = JSON.stringify(jsonData, null, 2);
+            // Logs utiles
+            console.log("Taille du JSON (nombre de caractères):", jsonStringTest.length);
+            console.log("100 premiers caractères RAW:", jsonStringTest.substring(0, 100));
+            console.log("100 derniers caractères RAW:", jsonStringTest.substring(jsonStringTest.length - 100));
+            
+            try {
+                if (Array.isArray(jsonData)) {
+                    console.log("🔄 Transformation du tableau en objet indexé par ID");
+                    
                     const result = {};
-                    parsedArray.forEach(item => {
-                        if (item.id) {
+                    jsonData.forEach((item, index) => {
+                        if (item && item.id) {
+                            console.log(`   ✅ Ajout élément avec ID: ${item.id}`);
                             result[item.id] = item;
+                        } else if (item) {
+                            console.log(`   ⚠️ Élément ${index} sans ID, attribution ID auto`);
+                            const autoId = `auto-${index}-${Date.now()}`;
+                            result[autoId] = { ...item, id: autoId };
                         }
                     });
                     
-                    jsonData = result; // Maintenant c'est un objet {}
-                } else {
-                    jsonData = JSON.parse(cleanedContent);
+                    jsonData = result;
+                    console.log("✅ Tableau transformé en objet avec", Object.keys(result).length, "éléments");
                 }
             } catch (e) {
                 throw new Error("Réponse IA invalide (non JSON)");
