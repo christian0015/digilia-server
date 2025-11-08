@@ -462,9 +462,9 @@ async function queryAI(promptData, model) {
                 });
             // console.log(response);
             // util.inspect permet de sérialiser des objets complexes sans erreur
-            const fullResponse = util.inspect(response, { depth: null, colors: false });
+            // const fullResponse = util.inspect(response, { depth: null, colors: false });
             // fs.writeFileSync("response.txt", fullResponse, "utf-8");
-            console.log("Réponse complète sauvegardée dans response.txt ✅");
+            // console.log("Réponse complète sauvegardée dans response.txt ✅");
 
             
             console.log(`✅ Succès avec clé API ${i + 1} pour ${serviceName}`);
