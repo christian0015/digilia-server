@@ -17,6 +17,11 @@ const projetSchema = new mongoose.Schema({
     type: String, // Contient le code du projet ou une référence à un fichier
     required: true,
   },
+  projectType: {
+    type: String,
+    enum: ['full-3d', 'jsx-3d'],
+    default: 'full-3d'
+  },
   downloads: {
     type: Number,
     default: 0,

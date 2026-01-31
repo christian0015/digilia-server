@@ -1,30 +1,104 @@
+// authController.js
 const User = require('../models/User');
 const Projet = require('../models/Projet');
 const Export = require('../models/Export');
 const bcrypt = require('bcryptjs');
 const generateToken = require('../utils/generateToken');
+const crypto = require('crypto');
+const sendEmail = require('../utils/emailService');
+const { OAuth2Client } = require('google-auth-library');
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 // Connexion
 exports.login = async (req, res) => {
   const { email, password } = req.body;
 
   try {
+    // Vérifier si l'utilisateur est temporairement bloqué
     const user = await User.findOne({ email });
+    
     if (!user) {
-      return res.status(400).json({ message: 'Utilisateur introuvable' });
+      return res.status(400).json({ 
+        message: 'Identifiants incorrects' // Message générique pour la sécurité
+      });
+    }
+
+    // Vérifier si le compte est verrouillé
+    if (user.lockUntil && user.lockUntil > Date.now()) {
+      const remainingTime = Math.ceil((user.lockUntil - Date.now()) / 60000);
+      return res.status(423).json({
+        message: `Compte temporairement verrouillé. Réessayez dans ${remainingTime} minutes.`
+      });
+    }
+
+    // Vérifier si c'est un utilisateur Google sans mot de passe
+    if (user.googleId && !user.password) {
+      return res.status(400).json({
+        message: 'Veuillez vous connecter avec Google'
+      });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
+    
     if (!isMatch) {
-      return res.status(400).json({ message: 'Mot de passe incorrect' });
+      // Incrémenter les tentatives échouées
+      user.loginAttempts += 1;
+      
+      if (user.loginAttempts >= 5) {
+        // Verrouiller le compte pendant 15 minutes
+        user.lockUntil = Date.now() + 15 * 60 * 1000;
+        await user.save();
+        
+        return res.status(423).json({
+          message: 'Trop de tentatives échouées. Compte verrouillé pendant 15 minutes.'
+        });
+      }
+      
+      await user.save();
+      return res.status(400).json({ 
+        message: 'Identifiants incorrects' 
+      });
     }
 
-    const token = generateToken(user._id, '2d'); // Expiration 2 jours);
+    // Vérifier si l'email est confirmé
+    if (!user.isEmailVerified && !user.googleId) {
+      return res.status(403).json({
+        message: 'Veuillez vérifier votre email avant de vous connecter',
+        needsVerification: true,
+        email: user.email
+      });
+    }
+
+    // Réinitialiser les tentatives après une connexion réussie
+    user.loginAttempts = 0;
+    user.lockUntil = undefined;
+    user.lastLogin = Date.now();
+    await user.save();
+
+    const token = generateToken(user._id, '2d');
     const { password: _, ...userWithoutPassword } = user.toObject();
-    // Ajouter le token dans l'objet user
+    
     userWithoutPassword.token = token;
-    res.json({ token, user: userWithoutPassword });
+    
+    // Calcul des quotas
+    const dailyLimit = user.subscription?.type === 'premium' ? 10
+      : (user.subscription?.type === 'basic' ? 5 : 5);
+    const paidLimit = user.subscription?.type === 'premium' ? 50 
+      : (user.subscription?.type === 'basic' ? 20 : 0);
+    
+    userWithoutPassword.dailyRemaining = Math.max(0, dailyLimit - user.dailyGenerations);
+    userWithoutPassword.paidUsed = user.subscription?.type !== 'free' 
+      ? Math.max(0, paidLimit - user.paidGenerations) 
+      : 0;
+
+    res.json({ 
+      token, 
+      user: userWithoutPassword 
+    });
   } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({ message: 'Erreur serveur' });
   }
 };
@@ -34,54 +108,446 @@ exports.register = async (req, res) => {
   const { username, email, password } = req.body;
 
   try {
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-
-      const isMatch = await bcrypt.compare(password, existingUser.password);
-        if (isMatch) {
-          const token = generateToken(existingUser._id, '2d'); // Expiration 2 jours);
-          const { password: _, ...userWithoutPassword } = existingUser.toObject();
-          // Ajouter le token dans l'objet existingUser
-          userWithoutPassword.token = token;
-          return res.json({ token, user: userWithoutPassword });
-        }
-
-      return res.status(400).json({ message: 'Cet email est déjà utilisé. Essayez de vous connecter.' });
-    }
-
-    // Hasher le mot de passe avant de créer l'utilisateur
-    const hashedPassword = await bcrypt.hash(password, 10); // 10 est le facteur de coût pour bcrypt
-
-    const user = new User({ username, email, password: hashedPassword });
-    await user.save();
-
-    const token = generateToken(user._id, '2d'); // Expiration 2 jours);
-    res.status(201).json({
-      message: 'Inscription réussie.',
-      user: { _id: user._id, username: user.username, email: user.email, role: user.role, token: token },
-      token,
-    });
-  } catch (error) {
-    // 👇 Ici on gère le cas MongoDB duplicate key
-    if (error.code === 11000) {
-      return res.status(400).json({
-        message: 'Erreur lors de l’inscription.',
-        error: 'Cet email ou nom d’utilisateur est déjà utilisé.',
+    // Validation du mot de passe
+    if (password.length < 8) {
+      return res.status(400).json({ 
+        message: 'Le mot de passe doit contenir au moins 8 caractères' 
       });
     }
-    res.status(500).json({ message: 'Erreur lors de l’inscription.', error });
+
+    if (!/[A-Z]/.test(password)) {
+      return res.status(400).json({ 
+        message: 'Le mot de passe doit contenir au moins une majuscule' 
+      });
+    }
+
+    if (!/[0-9]/.test(password)) {
+      return res.status(400).json({ 
+        message: 'Le mot de passe doit contenir au moins un chiffre' 
+      });
+    }
+
+    const existingUser = await User.findOne({ 
+      $or: [{ email }, { username }] 
+    });
+
+    if (existingUser) {
+      if (existingUser.email === email) {
+        // Si l'utilisateur existe mais n'est pas vérifié, on peut renvoyer un code
+        if (!existingUser.isEmailVerified) {
+          await sendVerificationEmail(existingUser);
+          return res.status(400).json({
+            message: 'Email déjà utilisé mais non vérifié. Un nouveau code a été envoyé.',
+            needsVerification: true,
+            email: existingUser.email
+          });
+        }
+        return res.status(400).json({ 
+          message: 'Cet email est déjà utilisé' 
+        });
+      }
+      
+      if (existingUser.username === username) {
+        return res.status(400).json({ 
+          message: 'Ce nom d\'utilisateur est déjà pris' 
+        });
+      }
+    }
+
+    // Hasher le mot de passe
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = new User({ 
+      username, 
+      email, 
+      password: hashedPassword,
+      emailVerificationToken: crypto.randomBytes(6).toString('hex'),
+      emailVerificationExpires: Date.now() + 24 * 60 * 60 * 1000 // 24 heures
+    });
+
+    await user.save();
+
+    // Envoyer l'email de vérification
+    await sendVerificationEmail(user);
+
+    // Générer un token temporaire (valide seulement pour la vérification)
+    const tempToken = generateToken(user._id, '1h');
+
+    res.status(201).json({
+      message: 'Inscription réussie. Veuillez vérifier votre email.',
+      needsVerification: true,
+      email: user.email,
+      tempToken
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+    
+    if (error.code === 11000) {
+      const field = error.keyPattern.email ? 'email' : 'username';
+      return res.status(400).json({
+        message: `Cet ${field} est déjà utilisé.`
+      });
+    }
+    
+    res.status(500).json({ 
+      message: 'Erreur lors de l\'inscription', 
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined 
+    });
   }
 };
 
-// Mise à jour du profil
-exports.update = async (req, res) => {
-  // const userId = req.body._id;
-  // const username = req.body.username;
-  // const email = req.body.email;
-  // const password = req.body.password;
-  const { _id: userId, username, email, password } = req.body; // Ajoutez password ici
+// Vérification d'email
+exports.verifyEmail = async (req, res) => {
+  const { token } = req.body;
 
-  
+  try {
+    const user = await User.findOne({
+      emailVerificationToken: token,
+      emailVerificationExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ 
+        message: 'Lien de vérification invalide ou expiré' 
+      });
+    }
+
+    user.isEmailVerified = true;
+    user.emailVerificationToken = undefined;
+    user.emailVerificationExpires = undefined;
+    await user.save();
+
+    // Générer un vrai token de connexion
+    const authToken = generateToken(user._id, '2d');
+    const { password: _, ...userWithoutPassword } = user.toObject();
+    userWithoutPassword.token = authToken;
+
+    res.json({
+      message: 'Email vérifié avec succès',
+      token: authToken,
+      user: userWithoutPassword
+    });
+  } catch (error) {
+    console.error('Verify email error:', error);
+    res.status(500).json({ message: 'Erreur lors de la vérification' });
+  }
+};
+
+// Renvoyer le code de vérification
+exports.resendVerification = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({ 
+        message: 'Utilisateur non trouvé' 
+      });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({ 
+        message: 'Email déjà vérifié' 
+      });
+    }
+
+    user.emailVerificationToken = crypto.randomBytes(32).toString('hex');
+    user.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000;
+    await user.save();
+
+    await sendVerificationEmail(user);
+
+    res.json({ 
+      message: 'Nouveau code de vérification envoyé' 
+    });
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.status(500).json({ message: 'Erreur lors de l\'envoi' });
+  }
+};
+
+// Connexion avec Google
+exports.googleAuth = async (req, res) => {
+  const { tokenId } = req.body;
+
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken: tokenId,
+      audience: GOOGLE_CLIENT_ID
+    });
+
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = payload;
+
+    let user = await User.findOne({ 
+      $or: [{ googleId }, { email }] 
+    });
+
+    if (!user) {
+      // Créer un nouvel utilisateur
+      user = new User({
+        googleId,
+        email,
+        username: name || email.split('@')[0],
+        isEmailVerified: true, // Google vérifie déjà l'email
+        lastLogin: Date.now()
+      });
+    } else {
+      // Mettre à jour les infos Google si nécessaire
+      if (!user.googleId) {
+        user.googleId = googleId;
+      }
+      user.lastLogin = Date.now();
+      user.loginAttempts = 0;
+      user.lockUntil = undefined;
+    }
+
+    await user.save();
+
+    const authToken = generateToken(user._id, '2d');
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    // Calcul des quotas
+    const dailyLimit = user.subscription?.type === 'premium' ? 10
+      : (user.subscription?.type === 'basic' ? 5 : 5);
+    const paidLimit = user.subscription?.type === 'premium' ? 50 
+      : (user.subscription?.type === 'basic' ? 20 : 0);
+    
+    userResponse.dailyRemaining = Math.max(0, dailyLimit - user.dailyGenerations);
+    userResponse.paidUsed = user.subscription?.type !== 'free' 
+      ? Math.max(0, paidLimit - user.paidGenerations) 
+      : 0;
+
+    res.json({
+      token: authToken,
+      user: userResponse
+    });
+  } catch (error) {
+    console.error('Google auth error:', error);
+    res.status(400).json({ 
+      message: 'Échec de l\'authentification Google' 
+    });
+  }
+};
+
+// Callback pour OAuth server-side Google
+exports.googleCallback = async (req, res) => {
+  const { code } = req.query;
+  const { state } = req.query; // Optionnel : pour gérer le state OAuth
+
+  try {
+    // 1. Échanger le code d'autorisation contre des tokens
+    const { tokens } = await client.getToken({
+      code,
+      redirect_uri: `${process.env.BACKEND_URL}/api/auth/google/callback`
+    });
+
+    // 2. Vérifier l'ID token
+    const ticket = await client.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: GOOGLE_CLIENT_ID
+    });
+
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture, email_verified } = payload;
+
+    // 3. Chercher ou créer l'utilisateur (même logique que googleAuth)
+    let user = await User.findOne({ 
+      $or: [{ googleId }, { email }] 
+    });
+
+    if (!user) {
+      user = new User({
+        googleId,
+        email,
+        username: name || email.split('@')[0],
+        isEmailVerified: email_verified || true,
+        lastLogin: Date.now(),
+        avatar: picture
+      });
+    } else {
+      if (!user.googleId) user.googleId = googleId;
+      user.lastLogin = Date.now();
+      user.loginAttempts = 0;
+      user.lockUntil = undefined;
+      if (picture && !user.avatar) user.avatar = picture;
+    }
+
+    await user.save();
+
+    // 4. Générer notre token JWT
+    const authToken = generateToken(user._id, '2d');
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    // Calcul des quotas (comme dans login)
+    const dailyLimit = user.subscription?.type === 'premium' ? 10
+      : (user.subscription?.type === 'basic' ? 5 : 5);
+    const paidLimit = user.subscription?.type === 'premium' ? 50 
+      : (user.subscription?.type === 'basic' ? 20 : 0);
+    
+    userResponse.dailyRemaining = Math.max(0, dailyLimit - user.dailyGenerations);
+    userResponse.paidUsed = user.subscription?.type !== 'free' 
+      ? Math.max(0, paidLimit - user.paidGenerations) 
+      : 0;
+
+    // 5. Rediriger vers le frontend avec le token
+    // Option 1 : Redirection avec token dans l'URL (moins sécurisé)
+    // res.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${authToken}`);
+    
+    // Option 2 : Redirection avec token dans un cookie HTTP-only (plus sécurisé)
+    res.cookie('auth_token', authToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 2 * 24 * 60 * 60 * 1000, // 2 jours
+      sameSite: 'lax'
+    });
+    
+    // Option 3 : Page intermédiaire qui récupère le token (recommandé)
+    const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback`;
+    res.redirect(redirectUrl);
+
+  } catch (error) {
+    console.error('Google callback error:', error);
+    
+    // Rediriger vers la page de login avec une erreur
+    const errorUrl = `${process.env.FRONTEND_URL}/login?error=google_auth_failed`;
+    res.redirect(errorUrl);
+  }
+};
+
+// Mot de passe oublié
+exports.forgotPassword = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      // Pour la sécurité, ne pas révéler si l'email existe
+      return res.json({ 
+        message: 'Si un compte existe avec cet email, vous recevrez un lien de réinitialisation' 
+      });
+    }
+
+    // Générer un token de réinitialisation
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.passwordResetToken = crypto
+      .createHash('sha256')
+      .update(resetToken)
+      .digest('hex');
+    user.passwordResetExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
+
+    await user.save();
+
+    // Envoyer l'email
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+    
+    await sendEmail({
+      email: user.email,
+      subject: 'Réinitialisation de votre mot de passe',
+      html: `
+        <h1>Réinitialisation de mot de passe</h1>
+        <p>Cliquez sur le lien ci-dessous pour réinitialiser votre mot de passe :</p>
+        <a href="${resetUrl}" style="
+          display: inline-block;
+          padding: 12px 24px;
+          background-color: #4CAF50;
+          color: white;
+          text-decoration: none;
+          border-radius: 4px;
+          margin: 10px 0;
+        ">Réinitialiser mon mot de passe</a>
+        <p>Ce lien expirera dans 15 minutes.</p>
+        <p>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</p>
+      `
+    });
+
+    res.json({ 
+      message: 'Lien de réinitialisation envoyé par email' 
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ message: 'Erreur lors de l\'envoi de l\'email' });
+  }
+};
+
+// Réinitialisation du mot de passe
+exports.resetPassword = async (req, res) => {
+  const { token } = req.params;
+  const { password } = req.body;
+
+  try {
+    // Hasher le token pour le comparer avec celui en DB
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ 
+        message: 'Lien invalide ou expiré' 
+      });
+    }
+
+    // Validation du nouveau mot de passe
+    if (password.length < 8) {
+      return res.status(400).json({ 
+        message: 'Le mot de passe doit contenir au moins 8 caractères' 
+      });
+    }
+
+    if (!/[A-Z]/.test(password)) {
+      return res.status(400).json({ 
+        message: 'Le mot de passe doit contenir au moins une majuscule' 
+      });
+    }
+
+    if (!/[0-9]/.test(password)) {
+      return res.status(400).json({ 
+        message: 'Le mot de passe doit contenir au moins un chiffre' 
+      });
+    }
+
+    // Mettre à jour le mot de passe
+    user.password = await bcrypt.hash(password, 12);
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    user.loginAttempts = 0;
+    user.lockUntil = undefined;
+    await user.save();
+
+    // Envoyer une confirmation par email
+    await sendEmail({
+      email: user.email,
+      subject: 'Mot de passe modifié avec succès',
+      html: `
+        <h1>Mot de passe modifié</h1>
+        <p>Votre mot de passe a été modifié avec succès.</p>
+        <p>Si vous n'avez pas effectué cette modification, contactez immédiatement le support.</p>
+      `
+    });
+
+    res.json({ 
+      message: 'Mot de passe réinitialisé avec succès' 
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ message: 'Erreur lors de la réinitialisation' });
+  }
+};
+
+// Mise à jour du profil (inchangé)
+exports.update = async (req, res) => {
+  const { _id: userId, username, email, password } = req.body;
+
   try {
     const user = await User.findById(userId);
     if (!user) {
@@ -90,13 +556,20 @@ exports.update = async (req, res) => {
 
     if (username) user.username = username;
     if (email) user.email = email;
-    if (password) user.password = await bcrypt.hash(password, 10);
+    if (password) {
+      if (password.length < 8) {
+        return res.status(400).json({ 
+          message: 'Le mot de passe doit contenir au moins 8 caractères' 
+        });
+      }
+      user.password = await bcrypt.hash(password, 10);
+    }
 
     await user.save();
-    const token = generateToken(user._id, '2d'); // Expiration 2 jours);
+    const token = generateToken(user._id, '2d');
 
     res.status(200).json({
-      message: 'Profille mis à jour avec succès',
+      message: 'Profil mis à jour avec succès',
       user: { id: user._id, username: user.username, email: user.email, role: user.role },
       token,
     });
@@ -105,24 +578,16 @@ exports.update = async (req, res) => {
   }
 };
 
-// Suppression du compte
+// Suppression du compte (inchangé)
 exports.delete = async (req, res) => {
   const userId = req.params.userId;
 
   try {
-    // 1. Récupérer tous les projets de l'utilisateur
     const projets = await Projet.find({ user: userId });
-
-    // 2. Extraire les IDs des projets
     const projetIds = projets.map(p => p._id);
 
-    // 3. Supprimer tous les exports liés aux projets de l'utilisateur
     await Export.deleteMany({ projet: { $in: projetIds } });
-
-    // 4. Supprimer les projets
     await Projet.deleteMany({ user: userId });
-
-    // 5. Supprimer l'utilisateur
     await User.findByIdAndDelete(userId);
 
     res.status(200).json({ message: 'Compte et toutes les données associées supprimés avec succès.' });
@@ -130,3 +595,45 @@ exports.delete = async (req, res) => {
     res.status(500).json({ message: 'Erreur lors de la suppression du compte', error });
   }
 };
+
+// Fonction utilitaire pour envoyer les emails de vérification
+async function sendVerificationEmail(user) {
+  const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${user.emailVerificationToken}`;
+  
+  await sendEmail({
+    email: user.email,
+    subject: 'Vérification de votre email - Digilia',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #4CAF50;">Bienvenue sur Digilia !</h1>
+        <p>Merci de vous être inscrit. Pour compléter votre inscription, veuillez vérifier votre adresse email en cliquant sur le lien ci-dessous :</p>
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${verificationUrl}" style="
+            display: inline-block;
+            padding: 14px 28px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: bold;
+          ">Vérifier mon email</a>
+        </div>
+        
+        <p>Ou copiez-collez ce lien dans votre navigateur :</p>
+        <p style="background-color: #f4f4f4; padding: 10px; border-radius: 4px; word-break: break-all;">
+          ${verificationUrl}
+        </p>
+        
+        <p>Ce lien expirera dans 24 heures.</p>
+        
+        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+        
+        <p style="font-size: 12px; color: #666;">
+          Si vous n'avez pas créé de compte sur Digilia, ignorez simplement cet email.
+        </p>
+      </div>
+    `
+  });
+}

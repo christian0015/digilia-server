@@ -4,7 +4,7 @@ const Export = require('../models/Export');
 
   // Créer un projet
 exports.createProjet = async (req, res) => {
-  const { name, description, code } = req.body.newProjet;
+  const { name, description, code, projectType } = req.body.newProjet;
   const userId = req.body.userId;
 
   try {
@@ -13,6 +13,7 @@ exports.createProjet = async (req, res) => {
       name,
       description,
       code,
+      projectType: projectType || 'full-3d'
     });
 
     await projet.save();
@@ -46,7 +47,12 @@ const updateSubscriptionStatus = async (userId) => {
 exports.getUserProjets = async (req, res) => {
   try {
     const userId = req.query.userId; // Utilisation de req.query pour extraire userId
-    const projets = await Projet.find({ user: userId });
+    // const projets = await Projet.find({ user: userId });
+    // Sélectionner seulement les champs nécessaires, exclure le code
+    const projets = await Projet.find({ user: userId })
+      .select('_id name description projectType createdAt updatedAt downloads')
+      .sort({ createdAt: -1 });
+
     res.status(200).json(projets);
   } catch (error) {
     res.status(500).json({ message: 'Erreur lors de la récupération des projets', error });
@@ -74,6 +80,31 @@ exports.getOneProjet = async (req, res) => {
     res.status(500).json({ message: 'Erreur lors de la récupération du projet.', error });
   }
 };
+
+// Récupérer les statistiques de l'utilisateur
+exports.getUserStats = async (req, res) => {
+  try {
+    const userId = req.query.userId;
+    const projets = await Projet.find({ user: userId });
+    
+    const stats = {
+      total: projets.length,
+      full3d: projets.filter(p => p.projectType === 'full-3d').length,
+      jsx3d: projets.filter(p => p.projectType === 'jsx-3d').length,
+      recent: projets.slice(0, 5).map(p => ({
+        id: p._id,
+        name: p.name,
+        type: p.projectType,
+        date: p.createdAt
+      }))
+    };
+
+    res.status(200).json(stats);
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur lors de la récupération des statistiques', error });
+  }
+};
+
 
 
 

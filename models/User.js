@@ -1,3 +1,4 @@
+// [file name]: User.js
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
@@ -5,17 +6,34 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
+    trim: true,
+    minlength: 3,
+    maxlength: 30,
   },
   email: {
     type: String,
     required: true,
     unique: true,
     lowercase: true,
+    match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Email invalide'],
   },
   password: {
     type: String,
-    required: true,
+    required: function() { return !this.googleId; }, // Requis seulement pour auth classique
   },
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true,
+  },
+  isEmailVerified: {
+    type: Boolean,
+    default: false,
+  },
+  emailVerificationToken: String,
+  emailVerificationExpires: Date,
+  passwordResetToken: String,
+  passwordResetExpires: Date,
   role: {
     type: String,
     enum: ['admin', 'client'],
@@ -24,7 +42,7 @@ const userSchema = new mongoose.Schema({
   subscription: {
     type: {
       type: String,
-      enum: ['free', 'basic', 'premium'], // Types d'abonnement disponibles
+      enum: ['free', 'basic', 'premium'],
       default: 'free',
     },
     startDate: {
@@ -40,19 +58,45 @@ const userSchema = new mongoose.Schema({
       default: 'inactive',
     },
   },
-   // 🔹 Champs pour le suivi des quotas
-  dailyGenerations: { // Reset tous les jours à minuit
+  dailyGenerations: {
     type: Number,
     default: 0,
   },
-  paidGenerations: { // Reset après expiration de l’abonnement
+  paidGenerations: {
     type: Number,
     default: 0,
   },
-  lastReset: { // <- date dernier reset
-    type: Date, 
-    default: Date.now 
-  }, 
+  lastReset: {
+    type: Date,
+    default: Date.now,
+  },
+  freeDeepSeekGenerations: {
+    type: Number,
+    default: 3,
+  },
+  lastFreeDeepSeekReset: {
+    type: Date,
+    default: Date.now,
+  },
+  recentGenerations: [{
+    timestamp: { type: Date, default: Date.now },
+    model: String,
+    type: String,
+    typeSection: String,
+    data: { type: mongoose.Schema.Types.Mixed, default: {} },
+    requestId: String,
+    default: []
+  }],
+  lastLogin: {
+    type: Date,
+  },
+  loginAttempts: {
+    type: Number,
+    default: 0,
+  },
+  lockUntil: {
+    type: Date,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
@@ -61,12 +105,18 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
-}, { collection: 'digiliaUsers' }); // Nom de collection avec préfixe
+}, { collection: 'digiliaUsers' });
 
 userSchema.pre('save', function (next) {
   this.updatedAt = Date.now();
   next();
 });
+
+// Index pour les recherches fréquentes
+userSchema.index({ email: 1 });
+userSchema.index({ googleId: 1 });
+userSchema.index({ emailVerificationToken: 1 });
+userSchema.index({ passwordResetToken: 1 });
 
 const User = mongoose.model('User', userSchema);
 

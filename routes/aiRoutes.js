@@ -3,7 +3,9 @@ const express = require('express');
 const router = express.Router();
 const { chatAI, imageGen } = require('../controllers/aiPuterController');
 const { handleAICreation ,  } = require('../controllers/aiController');
+const { getUserStats } = require('../controllers/aiUserStats');
 
+router.get('/user-stats', getUserStats);
 
 // Route POST pour créer/générer une section ou un site
 router.post('/generate', handleAICreation);
