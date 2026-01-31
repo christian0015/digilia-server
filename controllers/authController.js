@@ -8,8 +8,22 @@ const crypto = require('crypto');
 const sendEmail = require('../utils/emailService');
 const { OAuth2Client } = require('google-auth-library');
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+// // Initialisez le client OAuth2 CORRECTEMENT
+// const oauth2Client = new OAuth2Client(
+//   process.env.GOOGLE_CLIENT_ID,
+//   process.env.GOOGLE_CLIENT_SECRET,
+//   `${process.env.BACKEND_URL}/api/auth/google/callback`
+// );
+// === INITIALISATION CORRECTE ===
+// Client OAuth2 SANS redirect_uri dans le constructeur
+const oauth2Client = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET
+  // NE PAS mettre redirect_uri ici !
+);
+
+// const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+// const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 // Connexion
 exports.login = async (req, res) => {
@@ -267,40 +281,45 @@ exports.resendVerification = async (req, res) => {
   }
 };
 
-// Connexion avec Google
+
+// === 1. CONNEXION AVEC GOOGLE (flux frontend) ===
 exports.googleAuth = async (req, res) => {
   const { tokenId } = req.body;
 
   try {
-    const ticket = await client.verifyIdToken({
+    console.log('Google Auth flux frontend démarré');
+    
+    const ticket = await oauth2Client.verifyIdToken({
       idToken: tokenId,
-      audience: GOOGLE_CLIENT_ID
+      audience: process.env.GOOGLE_CLIENT_ID
     });
 
     const payload = ticket.getPayload();
     const { sub: googleId, email, name, picture } = payload;
+
+    console.log('Utilisateur Google identifié:', email);
 
     let user = await User.findOne({ 
       $or: [{ googleId }, { email }] 
     });
 
     if (!user) {
-      // Créer un nouvel utilisateur
+      console.log('Création nouvel utilisateur');
       user = new User({
         googleId,
         email,
         username: name || email.split('@')[0],
-        isEmailVerified: true, // Google vérifie déjà l'email
-        lastLogin: Date.now()
+        isEmailVerified: true,
+        lastLogin: Date.now(),
+        avatar: picture
       });
     } else {
-      // Mettre à jour les infos Google si nécessaire
-      if (!user.googleId) {
-        user.googleId = googleId;
-      }
+      console.log('Mise à jour utilisateur existant');
+      if (!user.googleId) user.googleId = googleId;
       user.lastLogin = Date.now();
       user.loginAttempts = 0;
       user.lockUntil = undefined;
+      if (picture && !user.avatar) user.avatar = picture;
     }
 
     await user.save();
@@ -320,6 +339,8 @@ exports.googleAuth = async (req, res) => {
       ? Math.max(0, paidLimit - user.paidGenerations) 
       : 0;
 
+    console.log('Connexion Google réussie pour:', email);
+    
     res.json({
       token: authToken,
       user: userResponse
@@ -327,38 +348,65 @@ exports.googleAuth = async (req, res) => {
   } catch (error) {
     console.error('Google auth error:', error);
     res.status(400).json({ 
-      message: 'Échec de l\'authentification Google' 
+      message: 'Échec de l\'authentification Google',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
 
-// Callback pour OAuth server-side Google
+// === 2. CALLBACK GOOGLE OAUTH (flux server-side) ===
 exports.googleCallback = async (req, res) => {
-  const { code } = req.query;
-  const { state } = req.query; // Optionnel : pour gérer le state OAuth
+  console.log('=== GOOGLE CALLBACK DÉMARRÉ ===');
+  console.log('Code reçu:', req.query.code ? 'OUI' : 'NON');
+  console.log('Erreur Google:', req.query.error || 'AUCUNE');
+  
+  const { code, error } = req.query;
+
+  if (error) {
+    console.error('Google a retourné une erreur:', error);
+    return res.redirect(`${process.env.FRONTEND_URL}/login?error=google_${error}`);
+  }
+
+  if (!code) {
+    console.error('Pas de code d\'autorisation reçu');
+    return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_code`);
+  }
 
   try {
-    // 1. Échanger le code d'autorisation contre des tokens
-    const { tokens } = await client.getToken({
+    console.log('Échange du code contre token Google...');
+    
+    // Échange du code contre un token d'accès
+    const { tokens } = await oauth2Client.getToken({
       code,
-      redirect_uri: `${process.env.BACKEND_URL}/api/auth/google/callback`
+      redirect_uri: `${process.env.BACKEND_URL}/api/auth/google/callback`,
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET
     });
 
-    // 2. Vérifier l'ID token
-    const ticket = await client.verifyIdToken({
+    console.log('Tokens Google reçus');
+    
+    if (!tokens || !tokens.id_token) {
+      throw new Error('Pas de token ID reçu de Google');
+    }
+
+    // Vérification du token ID
+    const ticket = await oauth2Client.verifyIdToken({
       idToken: tokens.id_token,
-      audience: GOOGLE_CLIENT_ID
+      audience: process.env.GOOGLE_CLIENT_ID
     });
 
     const payload = ticket.getPayload();
+    console.log('Utilisateur Google authentifié:', payload.email);
+    
     const { sub: googleId, email, name, picture, email_verified } = payload;
 
-    // 3. Chercher ou créer l'utilisateur (même logique que googleAuth)
+    // Chercher ou créer l'utilisateur dans notre base
     let user = await User.findOne({ 
       $or: [{ googleId }, { email }] 
     });
 
     if (!user) {
+      console.log('Création nouvel utilisateur dans notre base');
       user = new User({
         googleId,
         email,
@@ -368,6 +416,7 @@ exports.googleCallback = async (req, res) => {
         avatar: picture
       });
     } else {
+      console.log('Mise à jour utilisateur existant');
       if (!user.googleId) user.googleId = googleId;
       user.lastLogin = Date.now();
       user.loginAttempts = 0;
@@ -376,47 +425,319 @@ exports.googleCallback = async (req, res) => {
     }
 
     await user.save();
+    console.log('Utilisateur sauvegardé:', user.email);
 
-    // 4. Générer notre token JWT
+    // Générer notre propre token JWT
     const authToken = generateToken(user._id, '2d');
-    const userResponse = user.toObject();
-    delete userResponse.password;
+    console.log('JWT généré');
 
-    // Calcul des quotas (comme dans login)
+    // Redirection vers le frontend avec le token
+    const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?token=${authToken}`;
+    console.log('Redirection vers:', redirectUrl);
+    
+    res.redirect(redirectUrl);
+
+  } catch (error) {
+    console.error('=== ERREUR GOOGLE CALLBACK ===');
+    console.error('Type:', error.constructor.name);
+    console.error('Message:', error.message);
+    console.error('Stack:', error.stack);
+    
+    if (error.response?.data) {
+      console.error('Réponse Google:', error.response.data);
+    }
+    
+    // Redirection avec erreur détaillée
+    const errorMsg = encodeURIComponent(error.message.substring(0, 100));
+    res.redirect(`${process.env.FRONTEND_URL}/login?error=google_auth_failed&details=${errorMsg}`);
+  }
+};
+
+// === 3. GET SESSION (pour récupérer les infos utilisateur) ===
+exports.getSession = async (req, res) => {
+  try {
+    console.log('Get session appelé');
+    
+    // Récupérer le token depuis la query string
+    const token = req.query.token;
+    
+    if (!token) {
+      console.log('Aucun token fourni');
+      return res.status(401).json({ 
+        message: 'Token manquant' 
+      });
+    }
+
+    console.log('Token JWT reçu, vérification...');
+    
+    // Vérifier le token JWT
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    console.log('Token JWT valide, ID utilisateur:', decoded.id);
+    
+    // Récupérer l'utilisateur
+    const user = await User.findById(decoded.id).select('-password');
+    
+    if (!user) {
+      console.log('Utilisateur non trouvé pour ID:', decoded.id);
+      return res.status(404).json({ 
+        message: 'Utilisateur non trouvé' 
+      });
+    }
+
+    console.log('Utilisateur trouvé:', user.email);
+
+    // Calcul des quotas
     const dailyLimit = user.subscription?.type === 'premium' ? 10
       : (user.subscription?.type === 'basic' ? 5 : 5);
     const paidLimit = user.subscription?.type === 'premium' ? 50 
       : (user.subscription?.type === 'basic' ? 20 : 0);
     
+    const userResponse = user.toObject();
     userResponse.dailyRemaining = Math.max(0, dailyLimit - user.dailyGenerations);
     userResponse.paidUsed = user.subscription?.type !== 'free' 
       ? Math.max(0, paidLimit - user.paidGenerations) 
       : 0;
 
-    // 5. Rediriger vers le frontend avec le token
-    // Option 1 : Redirection avec token dans l'URL (moins sécurisé)
-    // res.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${authToken}`);
+    console.log('Session retournée pour:', user.email);
     
-    // Option 2 : Redirection avec token dans un cookie HTTP-only (plus sécurisé)
-    res.cookie('auth_token', authToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 2 * 24 * 60 * 60 * 1000, // 2 jours
-      sameSite: 'lax'
+    res.json({
+      token,
+      user: userResponse
     });
     
-    // Option 3 : Page intermédiaire qui récupère le token (recommandé)
-    const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback`;
-    res.redirect(redirectUrl);
-
   } catch (error) {
-    console.error('Google callback error:', error);
+    console.error('Get session error:', error);
     
-    // Rediriger vers la page de login avec une erreur
-    const errorUrl = `${process.env.FRONTEND_URL}/login?error=google_auth_failed`;
-    res.redirect(errorUrl);
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ 
+        message: 'Token invalide' 
+      });
+    }
+    
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ 
+        message: 'Token expiré' 
+      });
+    }
+    
+    res.status(401).json({ 
+      message: 'Erreur d\'authentification' 
+    });
   }
 };
+
+// === 4. ROUTE DE TEST (optionnel mais utile) ===
+exports.testConfig = async (req, res) => {
+  res.json({
+    status: 'OK',
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID ? 'CONFIGURÉ' : 'MANQUANT',
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET ? 'CONFIGURÉ' : 'MANQUANT',
+      redirectUri: `${process.env.BACKEND_URL}/api/auth/google/callback`
+    },
+    urls: {
+      backend: process.env.BACKEND_URL || 'NON DÉFINI',
+      frontend: process.env.FRONTEND_URL || 'NON DÉFINI'
+    },
+    environment: process.env.NODE_ENV || 'development'
+  });
+};
+
+// // Connexion avec Google
+// exports.googleAuth = async (req, res) => {
+//   const { tokenId } = req.body;
+
+//   try {
+//     const ticket = await oauth2Client.verifyIdToken({
+//       idToken: tokenId,
+//       audience: GOOGLE_CLIENT_ID
+//     });
+
+//     const payload = ticket.getPayload();
+//     const { sub: googleId, email, name, picture } = payload;
+
+//     let user = await User.findOne({ 
+//       $or: [{ googleId }, { email }] 
+//     });
+
+//     if (!user) {
+//       // Créer un nouvel utilisateur
+//       user = new User({
+//         googleId,
+//         email,
+//         username: name || email.split('@')[0],
+//         isEmailVerified: true, // Google vérifie déjà l'email
+//         lastLogin: Date.now()
+//       });
+//     } else {
+//       // Mettre à jour les infos Google si nécessaire
+//       if (!user.googleId) {
+//         user.googleId = googleId;
+//       }
+//       user.lastLogin = Date.now();
+//       user.loginAttempts = 0;
+//       user.lockUntil = undefined;
+//     }
+
+//     await user.save();
+
+//     const authToken = generateToken(user._id, '2d');
+//     const userResponse = user.toObject();
+//     delete userResponse.password;
+
+//     // Calcul des quotas
+//     const dailyLimit = user.subscription?.type === 'premium' ? 10
+//       : (user.subscription?.type === 'basic' ? 5 : 5);
+//     const paidLimit = user.subscription?.type === 'premium' ? 50 
+//       : (user.subscription?.type === 'basic' ? 20 : 0);
+    
+//     userResponse.dailyRemaining = Math.max(0, dailyLimit - user.dailyGenerations);
+//     userResponse.paidUsed = user.subscription?.type !== 'free' 
+//       ? Math.max(0, paidLimit - user.paidGenerations) 
+//       : 0;
+
+//     res.json({
+//       token: authToken,
+//       user: userResponse
+//     });
+//   } catch (error) {
+//     console.error('Google auth error:', error);
+//     res.status(400).json({ 
+//       message: 'Échec de l\'authentification Google' 
+//     });
+//   }
+// };
+
+// // Callback pour OAuth server-side Google - VERSION CORRIGÉE
+// exports.googleCallback = async (req, res) => {
+//   console.log('Google OAuth callback reçu');
+  
+//   const { code, error } = req.query;
+
+//   if (error) {
+//     console.error('Erreur de Google:', error);
+//     return res.redirect(`${process.env.FRONTEND_URL}/login?error=google_${error}`);
+//   }
+
+//   if (!code) {
+//     console.error('Pas de code reçu de Google');
+//     return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_code`);
+//   }
+
+//   try {
+//     console.log('Échange du code contre token...');
+    
+//     // IMPORTANT: Utilisez oauth2Client qui a le client_secret
+//     const { tokens } = await oauth2Client.getToken({
+//       code,
+//       redirect_uri: `${process.env.BACKEND_URL}/api/auth/google/callback`
+//     });
+
+//     console.log('Token reçu, vérification...');
+    
+//     const ticket = await oauth2Client.verifyIdToken({
+//       idToken: tokens.id_token,
+//       audience: process.env.GOOGLE_CLIENT_ID
+//     });
+
+//     const payload = ticket.getPayload();
+//     const { sub: googleId, email, name, picture, email_verified } = payload;
+
+//     console.log('Utilisateur Google:', email);
+
+//     // Chercher ou créer l'utilisateur
+//     let user = await User.findOne({ 
+//       $or: [{ googleId }, { email }] 
+//     });
+
+//     if (!user) {
+//       user = new User({
+//         googleId,
+//         email,
+//         username: name || email.split('@')[0],
+//         isEmailVerified: email_verified || true,
+//         lastLogin: Date.now(),
+//         avatar: picture
+//       });
+//     } else {
+//       if (!user.googleId) user.googleId = googleId;
+//       user.lastLogin = Date.now();
+//       user.loginAttempts = 0;
+//       user.lockUntil = undefined;
+//       if (picture && !user.avatar) user.avatar = picture;
+//     }
+
+//     await user.save();
+
+//     // Générer notre token JWT
+//     const authToken = generateToken(user._id, '2d');
+    
+//     // OPTION SIMPLE: Rediriger avec token dans l'URL
+//     const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?token=${authToken}`;
+//     console.log('Redirection vers:', redirectUrl);
+    
+//     res.redirect(redirectUrl);
+
+//   } catch (error) {
+//     console.error('Erreur dans googleCallback:', error.message);
+    
+//     // Redirection avec message d'erreur détaillé
+//     const errorMsg = encodeURIComponent(error.message.substring(0, 100));
+//     res.redirect(`${process.env.FRONTEND_URL}/login?error=google_auth_failed&details=${errorMsg}`);
+//   }
+// };
+
+// // Ajoutez cette fonction pour récupérer la session
+// exports.getSession = async (req, res) => {
+//   try {
+//     // Si vous utilisez des cookies
+//     const token = req.cookies?.auth_token || req.query.token;
+    
+//     if (!token) {
+//       return res.status(401).json({ 
+//         message: 'Non authentifié' 
+//       });
+//     }
+
+//     // Vérifier le token et récupérer l'utilisateur
+//     const jwt = require('jsonwebtoken');
+//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+//     const user = await User.findById(decoded.id).select('-password');
+    
+//     if (!user) {
+//       return res.status(404).json({ 
+//         message: 'Utilisateur non trouvé' 
+//       });
+//     }
+
+//     // Calcul des quotas
+//     const dailyLimit = user.subscription?.type === 'premium' ? 10
+//       : (user.subscription?.type === 'basic' ? 5 : 5);
+//     const paidLimit = user.subscription?.type === 'premium' ? 50 
+//       : (user.subscription?.type === 'basic' ? 20 : 0);
+    
+//     const userResponse = user.toObject();
+//     userResponse.dailyRemaining = Math.max(0, dailyLimit - user.dailyGenerations);
+//     userResponse.paidUsed = user.subscription?.type !== 'free' 
+//       ? Math.max(0, paidLimit - user.paidGenerations) 
+//       : 0;
+
+//     res.json({
+//       token,
+//       user: userResponse
+//     });
+    
+//   } catch (error) {
+//     console.error('Get session error:', error);
+//     res.status(401).json({ 
+//       message: 'Token invalide ou expiré' 
+//     });
+//   }
+// };
+
 
 // Mot de passe oublié
 exports.forgotPassword = async (req, res) => {
