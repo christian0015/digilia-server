@@ -112,7 +112,7 @@ exports.login = async (req, res) => {
       user: userWithoutPassword 
     });
   } catch (error) {
-    console.error('Login error:', error);
+    // console.error('Login error:', error);
     res.status(500).json({ message: 'Erreur serveur' });
   }
 };
@@ -194,7 +194,7 @@ exports.register = async (req, res) => {
       tempToken
     });
   } catch (error) {
-    console.error('Register error:', error);
+    // console.error('Register error:', error);
     
     if (error.code === 11000) {
       const field = error.keyPattern.email ? 'email' : 'username';
@@ -242,7 +242,7 @@ exports.verifyEmail = async (req, res) => {
       user: userWithoutPassword
     });
   } catch (error) {
-    console.error('Verify email error:', error);
+    // console.error('Verify email error:', error);
     res.status(500).json({ message: 'Erreur lors de la vérification' });
   }
 };
@@ -276,7 +276,7 @@ exports.resendVerification = async (req, res) => {
       message: 'Nouveau code de vérification envoyé' 
     });
   } catch (error) {
-    console.error('Resend verification error:', error);
+    // console.error('Resend verification error:', error);
     res.status(500).json({ message: 'Erreur lors de l\'envoi' });
   }
 };
@@ -287,7 +287,7 @@ exports.googleAuth = async (req, res) => {
   const { tokenId } = req.body;
 
   try {
-    console.log('Google Auth flux frontend démarré');
+    // console.log('Google Auth flux frontend démarré');
     
     const ticket = await oauth2Client.verifyIdToken({
       idToken: tokenId,
@@ -297,14 +297,14 @@ exports.googleAuth = async (req, res) => {
     const payload = ticket.getPayload();
     const { sub: googleId, email, name, picture } = payload;
 
-    console.log('Utilisateur Google identifié:', email);
+    // console.log('Utilisateur Google identifié:', email);
 
     let user = await User.findOne({ 
       $or: [{ googleId }, { email }] 
     });
 
     if (!user) {
-      console.log('Création nouvel utilisateur');
+      // console.log('Création nouvel utilisateur');
       user = new User({
         googleId,
         email,
@@ -314,7 +314,7 @@ exports.googleAuth = async (req, res) => {
         avatar: picture
       });
     } else {
-      console.log('Mise à jour utilisateur existant');
+      // console.log('Mise à jour utilisateur existant');
       if (!user.googleId) user.googleId = googleId;
       user.lastLogin = Date.now();
       user.loginAttempts = 0;
@@ -339,14 +339,14 @@ exports.googleAuth = async (req, res) => {
       ? Math.max(0, paidLimit - user.paidGenerations) 
       : 0;
 
-    console.log('Connexion Google réussie pour:', email);
+    // console.log('Connexion Google réussie pour:', email);
     
     res.json({
       token: authToken,
       user: userResponse
     });
   } catch (error) {
-    console.error('Google auth error:', error);
+    // console.error('Google auth error:', error);
     res.status(400).json({ 
       message: 'Échec de l\'authentification Google',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -356,24 +356,24 @@ exports.googleAuth = async (req, res) => {
 
 // === 2. CALLBACK GOOGLE OAUTH (flux server-side) ===
 exports.googleCallback = async (req, res) => {
-  console.log('=== GOOGLE CALLBACK DÉMARRÉ ===');
-  console.log('Code reçu:', req.query.code ? 'OUI' : 'NON');
-  console.log('Erreur Google:', req.query.error || 'AUCUNE');
+  // console.log('=== GOOGLE CALLBACK DÉMARRÉ ===');
+  // console.log('Code reçu:', req.query.code ? 'OUI' : 'NON');
+  // console.log('Erreur Google:', req.query.error || 'AUCUNE');
   
   const { code, error } = req.query;
 
   if (error) {
-    console.error('Google a retourné une erreur:', error);
+    // console.error('Google a retourné une erreur:', error);
     return res.redirect(`${process.env.FRONTEND_URL}/login?error=google_${error}`);
   }
 
   if (!code) {
-    console.error('Pas de code d\'autorisation reçu');
+    // console.error('Pas de code d\'autorisation reçu');
     return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_code`);
   }
 
   try {
-    console.log('Échange du code contre token Google...');
+    // console.log('Échange du code contre token Google...');
     
     // Échange du code contre un token d'accès
     const { tokens } = await oauth2Client.getToken({
@@ -383,7 +383,7 @@ exports.googleCallback = async (req, res) => {
       client_secret: process.env.GOOGLE_CLIENT_SECRET
     });
 
-    console.log('Tokens Google reçus');
+    // console.log('Tokens Google reçus');
     
     if (!tokens || !tokens.id_token) {
       throw new Error('Pas de token ID reçu de Google');
@@ -396,7 +396,7 @@ exports.googleCallback = async (req, res) => {
     });
 
     const payload = ticket.getPayload();
-    console.log('Utilisateur Google authentifié:', payload.email);
+    // console.log('Utilisateur Google authentifié:', payload.email);
     
     const { sub: googleId, email, name, picture, email_verified } = payload;
 
@@ -406,7 +406,7 @@ exports.googleCallback = async (req, res) => {
     });
 
     if (!user) {
-      console.log('Création nouvel utilisateur dans notre base');
+      // console.log('Création nouvel utilisateur dans notre base');
       user = new User({
         googleId,
         email,
@@ -416,7 +416,7 @@ exports.googleCallback = async (req, res) => {
         avatar: picture
       });
     } else {
-      console.log('Mise à jour utilisateur existant');
+      // console.log('Mise à jour utilisateur existant');
       if (!user.googleId) user.googleId = googleId;
       user.lastLogin = Date.now();
       user.loginAttempts = 0;
@@ -425,26 +425,26 @@ exports.googleCallback = async (req, res) => {
     }
 
     await user.save();
-    console.log('Utilisateur sauvegardé:', user.email);
+    // console.log('Utilisateur sauvegardé:', user.email);
 
     // Générer notre propre token JWT
     const authToken = generateToken(user._id, '2d');
-    console.log('JWT généré');
+    // console.log('JWT généré');
 
     // Redirection vers le frontend avec le token
     const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?token=${authToken}`;
-    console.log('Redirection vers:', redirectUrl);
+    // console.log('Redirection vers:', redirectUrl);
     
     res.redirect(redirectUrl);
 
   } catch (error) {
-    console.error('=== ERREUR GOOGLE CALLBACK ===');
-    console.error('Type:', error.constructor.name);
-    console.error('Message:', error.message);
-    console.error('Stack:', error.stack);
+    // console.error('=== ERREUR GOOGLE CALLBACK ===');
+    // console.error('Type:', error.constructor.name);
+    // console.error('Message:', error.message);
+    // console.error('Stack:', error.stack);
     
     if (error.response?.data) {
-      console.error('Réponse Google:', error.response.data);
+      // console.error('Réponse Google:', error.response.data);
     }
     
     // Redirection avec erreur détaillée
@@ -456,37 +456,38 @@ exports.googleCallback = async (req, res) => {
 // === 3. GET SESSION (pour récupérer les infos utilisateur) ===
 exports.getSession = async (req, res) => {
   try {
-    console.log('Get session appelé');
+    // console.log('Get session appelé');
     
     // Récupérer le token depuis la query string
     const token = req.query.token;
+    // console.log("Mon token: ", token)
     
     if (!token) {
-      console.log('Aucun token fourni');
+      // console.log('Aucun token fourni');
       return res.status(401).json({ 
         message: 'Token manquant' 
       });
     }
 
-    console.log('Token JWT reçu, vérification...');
+    // console.log('Token JWT reçu, vérification...');
     
     // Vérifier le token JWT
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    console.log('Token JWT valide, ID utilisateur:', decoded.id);
+    // console.log('Token JWT valide, ID utilisateur:', decoded.userId);
     
     // Récupérer l'utilisateur
-    const user = await User.findById(decoded.id).select('-password');
+    const user = await User.findById(decoded.userId).select('-password');
     
     if (!user) {
-      console.log('Utilisateur non trouvé pour ID:', decoded.id);
+      // console.log('Utilisateur non trouvé pour ID:', decoded.id);
       return res.status(404).json({ 
         message: 'Utilisateur non trouvé' 
       });
     }
 
-    console.log('Utilisateur trouvé:', user.email);
+    // console.log('Utilisateur trouvé:', user.email);
 
     // Calcul des quotas
     const dailyLimit = user.subscription?.type === 'premium' ? 10
@@ -500,7 +501,7 @@ exports.getSession = async (req, res) => {
       ? Math.max(0, paidLimit - user.paidGenerations) 
       : 0;
 
-    console.log('Session retournée pour:', user.email);
+    // console.log('Session retournée pour:', user.email);
     
     res.json({
       token,
@@ -508,7 +509,7 @@ exports.getSession = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Get session error:', error);
+    // console.error('Get session error:', error);
     
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({ 
@@ -790,7 +791,7 @@ exports.forgotPassword = async (req, res) => {
       message: 'Lien de réinitialisation envoyé par email' 
     });
   } catch (error) {
-    console.error('Forgot password error:', error);
+    // console.error('Forgot password error:', error);
     res.status(500).json({ message: 'Erreur lors de l\'envoi de l\'email' });
   }
 };
@@ -860,7 +861,7 @@ exports.resetPassword = async (req, res) => {
       message: 'Mot de passe réinitialisé avec succès' 
     });
   } catch (error) {
-    console.error('Reset password error:', error);
+    // console.error('Reset password error:', error);
     res.status(500).json({ message: 'Erreur lors de la réinitialisation' });
   }
 };

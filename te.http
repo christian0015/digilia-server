@@ -1,0 +1,10 @@
+### Test GET session avec query string
+GET http://localhost:5001/api/auth/session?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OTgwNzk2ZGQ3YjRiY2QwMGY1MjQzMDUiLCJpYXQiOjE3NzAwMjgyNTAsImV4cCI6MTc3MDIwMTA1MH0.zYcNbTafoS5opDDvA_W3fXzN9BrmBO4Cz7qnnaGpMEI
+Accept: application/json
+
+###
+
+# Option alternative: test avec Authorization header
+GET https://digilia-server.vercel.app/api/auth/session
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OTgwNzk2ZGQ3YjRiY2QwMGY1MjQzMDUiLCJpYXQiOjE3NzAwMjgyNTAsImV4cCI6MTc3MDIwMTA1MH0.zYcNbTafoS5opDDvA_W3fXzN9BrmBO4Cz7qnnaGpMEI
+Accept: application/json
