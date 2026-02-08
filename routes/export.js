@@ -16,7 +16,7 @@ function generateExportKey(username, projetName) {
 
 // ----------- Détection automatique du type de projet ----------- //
 function detectProjectType(code) {
-  if (!code) return 'full-3d';
+  if (!code) return 'experience-3d'; // Changé par défaut
   
   try {
     let data = code;
@@ -24,35 +24,43 @@ function detectProjectType(code) {
       try {
         data = JSON.parse(code);
       } catch {
-        return 'full-3d';
+        return 'experience-3d'; // Changé par défaut
       }
     }
     
-    // Si c'est un tableau (probablement jsx-3d)
-    if (Array.isArray(data)) {
-      if (data.length > 0) {
-        const first = data[0];
-        // Vérifier les types d'éléments
-        const elementTypes = ['jsxElement', '3DElement', 'textElement', 'imageElement'];
-        if (elementTypes.includes(first.elementType) || 
-            first.style !== undefined ||
-            ['section', 'div', 'header', 'nav', 'button', 'a'].includes(first.type)) {
-          return 'jsx-3d';
-        }
+    // Nouveau format "experience-3d" avec structure site/layout
+    if (typeof data === 'object' && data !== null) {
+      // Vérifier si c'est le nouveau format "experience-3d"
+      if (data.type === 'site' && Array.isArray(data.layout)) {
+        return 'experience-3d';
       }
-    } 
-    // Si c'est un objet (probablement full-3d)
-    else if (typeof data === 'object' && data !== null) {
-      const full3dKeys = ['scene', 'camera', 'interaction', 'scroll', 'lights'];
-      if (full3dKeys.some(key => data[key] !== undefined)) {
-        return 'full-3d';
+      
+      // Si c'est un tableau (probablement jsx-3d)
+      if (Array.isArray(data)) {
+        if (data.length > 0) {
+          const first = data[0];
+          // Vérifier les types d'éléments
+          const elementTypes = ['jsxElement', '3DElement', 'textElement', 'imageElement'];
+          if (elementTypes.includes(first.elementType) || 
+              first.style !== undefined ||
+              ['section', 'div', 'header', 'nav', 'button', 'a'].includes(first.type)) {
+            return 'jsx-3d';
+          }
+        }
+      } 
+      // Si c'est un objet (probablement full-3d)
+      else if (typeof data === 'object') {
+        const full3dKeys = ['scene', 'camera', 'interaction', 'scroll', 'lights'];
+        if (full3dKeys.some(key => data[key] !== undefined)) {
+          return 'full-3d';
+        }
       }
     }
   } catch (e) {
     console.error('Erreur détection type:', e);
   }
   
-  return 'full-3d';
+  return 'experience-3d'; // Changé par défaut
 }
 
 // ----------- Création / MAJ de l'export ----------- //
@@ -200,8 +208,10 @@ router.get('/:exportKey', async (req, res) => {
     // Compatibilité avec l'ancien système
     if (projectType === 'jsx-3d') {
       response.components = data;
-    } else {
+    } else if (projectType === 'full-3d') {
       response.scene = data;
+    } else if (projectType === 'experience-3d') {
+      response.site = data;
     }
     
     // Ancienne logique de cache RAM (commentée)
@@ -220,52 +230,6 @@ router.get('/:exportKey', async (req, res) => {
 });
 
 // ----------- Ancienne logique HTML (commentée) ----------- //
-//   const cacheKey = `export:${exportKey}`;
-//   const now = Date.now();
-
-//   try {
-//     // ⚡️ 1. RAM CACHE : existe et pas expiré
-//     const cached = exportCache[cacheKey];
-//     if (cached && cached.expire > now) {
-//       console.log('⚡️ Export RAM cache hit');
-//       return res.status(200).send(cached.html);
-//     }
-
-//     // 🐢 2. Sinon, DB lookup
-//     const exportDoc = await Export.findOne({ exportKey }).populate('projet');
-//     if (!exportDoc) return res.status(404).send('Export non trouvé');
-
-//     const projet = exportDoc.projet;
-
-//     const exportHTML = `
-//       <!DOCTYPE html>
-//       <html>
-//         <head><title>Export Projet - ${projet.name}</title></head>
-//         <body>
-//           <h1>${projet.name}</h1>
-//           <p>${projet.description}</p>
-//           <pre>${JSON.stringify(projet.code, null, 2)}</pre>
-//         </body>
-//       </html>
-//     `;
-
-//     // ⏱️ 3. Stockage dans le cache RAM pour 90 secondes
-//     exportCache[cacheKey] = {
-//       html: exportHTML,
-//       expire: now + 90 * 1000, // 90s en millisecondes
-//     };
-
-//     console.log('✅ Export généré depuis MongoDB');
-
-//     res.status(200).send(exportHTML);
-//   } catch (error) {
-//     console.error(error);
-//     res.status(500).send('Erreur serveur lors de la récupération export');
-//   }
-// });
-
-module.exports = router;
-// ----------- Ancienne logique HTML (commentée pour référence) ----------- //
 //   const cacheKey = `export:${exportKey}`;
 //   const now = Date.now();
 

@@ -2,7 +2,7 @@ const Projet = require('../models/Projet');
 const User = require('../models/User'); // Assurez-vous d'importer le modèle User
 const Export = require('../models/Export');
 
-  // Créer un projet
+// Créer un projet
 exports.createProjet = async (req, res) => {
   const { name, description, code, projectType } = req.body.newProjet;
   const userId = req.body.userId;
@@ -13,7 +13,7 @@ exports.createProjet = async (req, res) => {
       name,
       description,
       code,
-      projectType: projectType || 'full-3d'
+      projectType: projectType || 'experience-3d'
     });
 
     await projet.save();
@@ -91,6 +91,7 @@ exports.getUserStats = async (req, res) => {
       total: projets.length,
       full3d: projets.filter(p => p.projectType === 'full-3d').length,
       jsx3d: projets.filter(p => p.projectType === 'jsx-3d').length,
+      experience3d: projets.filter(p => p.projectType === 'experience-3d').length,
       recent: projets.slice(0, 5).map(p => ({
         id: p._id,
         name: p.name,

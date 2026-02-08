@@ -19,8 +19,8 @@ const projetSchema = new mongoose.Schema({
   },
   projectType: {
     type: String,
-    enum: ['full-3d', 'jsx-3d'],
-    default: 'full-3d'
+    enum: ['full-3d', 'jsx-3d', 'experience-3d'], 
+    default: 'experience-3d'
   },
   downloads: {
     type: Number,
